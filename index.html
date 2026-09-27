@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0d0a14">
+<title>Sunset Flow Field · Perlin 流场生成艺术</title>
+<style>
+  :root{
+    --bg:#0d0a14;
+    --text:#ece7f6;
+    --text-dim:rgba(236,231,246,.55);
+    --line:rgba(255,255,255,.09);
+    --panel:rgba(19,14,30,.58);
+    --coral:#ff6e62;
+    --amber:#ffb347;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  html{color-scheme:dark}
+  body{
+    background:var(--bg);
+    color:var(--text);
+    font-family:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,-apple-system,sans-serif;
+    overflow:hidden;
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  canvas{position:fixed;inset:0;display:block;z-index:0}
+  #fx{pointer-events:none}
+
+  .brand{position:fixed;top:26px;left:30px;z-index:2;user-select:none;pointer-events:none;animation:fadein 1s ease both}
+  .brand h1{
+    font-size:15px;font-weight:600;letter-spacing:.32em;text-transform:uppercase;text-wrap:balance;
+    background:linear-gradient(100deg,#ffe0a8,#ff8e6e 45%,#e668b8 80%,#9d8bff);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+  }
+  .brand p{margin-top:7px;font-size:12px;letter-spacing:.14em;color:var(--text-dim)}
+  .brand .rule{width:46px;height:1px;background:linear-gradient(90deg,var(--coral),transparent);margin-top:11px}
+
+  .panel{
+    position:fixed;left:30px;bottom:calc(26px + env(safe-area-inset-bottom));z-index:2;
+    display:flex;align-items:center;gap:20px;flex-wrap:wrap;
+    max-width:calc(100vw - 60px);
+    background:var(--panel);
+    border:1px solid var(--line);
+    border-radius:14px;
+    padding:14px 18px;
+    backdrop-filter:blur(16px) saturate(140%);
+    -webkit-backdrop-filter:blur(16px) saturate(140%);
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+    user-select:none;
+    animation:fadein 1.2s .15s ease both;
+  }
+  .stats{display:flex;gap:22px}
+  .stat{display:flex;flex-direction:column;gap:4px;min-width:60px}
+  .stat .label{font-size:10px;letter-spacing:.18em;color:var(--text-dim);white-space:nowrap}
+  .stat .value{
+    font-family:ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace;
+    font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;
+  }
+  #seed{color:#ffc27a}
+  .divider{width:1px;align-self:stretch;background:var(--line)}
+  .actions{display:flex;gap:10px}
+  button{
+    appearance:none;border:0;cursor:pointer;touch-action:manipulation;
+    font:inherit;font-size:13px;font-weight:600;letter-spacing:.02em;
+    padding:10px 16px;border-radius:9px;
+    display:inline-flex;align-items:center;gap:7px;
+    transition:transform .15s ease, box-shadow .15s ease, background-color .15s ease;
+  }
+  button:hover{transform:translateY(-1px)}
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+  button svg{width:14px;height:14px;flex:none}
+  #btnRegen{background:linear-gradient(135deg,var(--coral),var(--amber));color:#2a1206;box-shadow:0 6px 18px rgba(255,110,80,.28)}
+  #btnRegen:hover{box-shadow:0 8px 24px rgba(255,130,80,.42)}
+  #btnSave{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.16);color:var(--text)}
+  #btnSave:hover{background-color:rgba(255,255,255,.11)}
+  .hint{width:100%;font-size:11px;color:var(--text-dim);letter-spacing:.05em}
+  .hint kbd{
+    font-family:ui-monospace,Consolas,monospace;font-size:10px;
+    border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;
+    padding:1px 5px;margin:0 2px;background:rgba(255,255,255,.05);
+  }
+  @keyframes fadein{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  @media (max-width:640px){
+    .brand{top:18px;left:18px}
+    .panel{left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));max-width:none;gap:12px;padding:12px 14px}
+    .stats{gap:14px;flex:1}
+    .divider,.hint{display:none}
+    button{padding:10px 12px}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .brand,.panel{animation:none}
+    button{transition:none}
+  }
+</style>
+</head>
+<body>
+<canvas id="art" aria-hidden="true"></canvas>
+<canvas id="fx" aria-hidden="true"></canvas>
+
+<header class="brand">
+  <h1>Sunset Flow Field</h1>
+  <p>Perlin 噪声向量场 · 粒子轨迹生成艺术</p>
+  <div class="rule"></div>
+</header>
+
+<aside class="panel">
+  <div class="stats">
+    <div class="stat"><span class="label">种子 SEED</span><span class="value" id="seed">—</span></div>
+    <div class="stat"><span class="label">粒子 PARTICLES</span><span class="value" id="count">—</span></div>
+    <div class="stat"><span class="label">帧率 FPS</span><span class="value" id="fps">—</span></div>
+  </div>
+  <div class="divider" aria-hidden="true"></div>
+  <div class="actions">
+    <button id="btnRegen" title="生成新的随机种子 (R)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      重新生成
+    </button>
+    <button id="btnSave" title="导出当前画面为 PNG (S)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/></svg>
+      保存为 PNG
+    </button>
+  </div>
+  <p class="hint">快捷键：<kbd>R</kbd> 重新生成 · <kbd>S</kbd> 保存图片</p>
+</aside>
+
+<script>
+'use strict';
+const TAU = Math.PI * 2;
+const BG = '#0d0a14';
+const B = 16;              // 调色板分桶数（按颜色批量描边，减少 stroke 次数）
+const MAXN = 12000;
+
+/* ---------- 种子随机 & Perlin 噪声 ---------- */
+function mulberry32(a){
+  return function(){
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+
+function makePerlin(seed){
+  const rand = mulberry32(seed);
+  const p = new Uint8Array(512), perm = new Uint8Array(256);
+  for(let i = 0; i < 256; i++) perm[i] = i;
+  for(let i = 255; i > 0; i--){
+    const j = (rand() * (i + 1)) | 0;
+    const t = perm[i]; perm[i] = perm[j]; perm[j] = t;
+  }
+  for(let i = 0; i < 512; i++) p[i] = perm[i & 255];
+  const fade = t => t * t * t * (t * (t * 6 - 15) + 10);
+  const lerp = (a, b, t) => a + t * (b - a);
+  function grad(h, x, y, z){
+    h &= 15;
+    const u = h < 8 ? x : y;
+    const v = h < 4 ? y : (h === 12 || h === 14 ? x : z);
+    return ((h & 1) === 0 ? u : -u) + ((h & 2) === 0 ? v : -v);
+  }
+  return function(x, y, z){
+    const fx = Math.floor(x), fy = Math.floor(y), fz = Math.floor(z);
+    const X = fx & 255, Y = fy & 255, Z = fz & 255;
+    x -= fx; y -= fy; z -= fz;
+    const u = fade(x), v = fade(y), w = fade(z);
+    const A = p[X] + Y, AA = p[A] + Z, AB = p[A + 1] + Z;
+    const Bq = p[X + 1] + Y, BA = p[Bq] + Z, BB = p[Bq + 1] + Z;
+    return lerp(
+      lerp(lerp(grad(p[AA], x, y, z),     grad(p[BA], x - 1, y, z), u),
+           lerp(grad(p[AB], x, y - 1, z), grad(p[BB], x - 1, y - 1, z), u), v),
+      lerp(lerp(grad(p[AA + 1], x, y, z - 1),     grad(p[BA + 1], x - 1, y, z - 1), u),
+           lerp(grad(p[AB + 1], x, y - 1, z - 1), grad(p[BB + 1], x - 1, y - 1, z - 1), u), v),
+      w);
+  };
+}
+
+/* ---------- 日落调色板：靛蓝 → 品红 → 珊瑚 → 琥珀 ---------- */
+const RAMP = ['#38296f','#5c49cf','#9c4bd0','#e0509e','#ff6e62','#ff9450','#ffc45e','#ffe8b0'];
+const bucketStyle = new Array(B);
+(function buildRamp(){
+  const stops = RAMP.map(h => [
+    parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)
+  ]);
+  for(let b = 0; b < B; b++){
+    const t = b / (B - 1) * (stops.length - 1);
+    const i = Math.min(stops.length - 2, Math.floor(t)), f = t - i;
+    const r = Math.round(stops[i][0] + (stops[i + 1][0] - stops[i][0]) * f);
+    const g = Math.round(stops[i][1] + (stops[i + 1][1] - stops[i][1]) * f);
+    const c = Math.round(stops[i][2] + (stops[i + 1][2] - stops[i][2]) * f);
+    bucketStyle[b] = 'rgb(' + r + ',' + g + ',' + c + ')';
+  }
+})();
+
+/* ---------- 三角函数查找表（替代逐粒子 Math.cos/sin） ---------- */
+const TRIG_N = 4096, TRIG_MASK = 4095, TRIG_SCALE = TRIG_N / TAU;
+const SIN_T = new Float32Array(TRIG_N), COS_T = new Float32Array(TRIG_N);
+for(let i = 0; i < TRIG_N; i++){
+  const a = i / TRIG_N * TAU;
+  SIN_T[i] = Math.sin(a);
+  COS_T[i] = Math.cos(a);
+}
+
+/* ---------- 状态 ---------- */
+const art = document.getElementById('art'), fx = document.getElementById('fx');
+const actx = art.getContext('2d'), fctx = fx.getContext('2d');
+const seedEl = document.getElementById('seed');
+const countEl = document.getElementById('count');
+const fpsEl = document.getElementById('fps');
+
+const px = new Float32Array(MAXN), py = new Float32Array(MAXN);
+const ox = new Float32Array(MAXN), oy = new Float32Array(MAXN);
+const life = new Float32Array(MAXN);
+const col = new Uint8Array(MAXN);
+const counts = new Int32Array(B), starts = new Int32Array(B + 1), cursor = new Int32Array(B), order = new Int32Array(MAXN);
+
+let W = 0, H = 0, dpr = 1, N = 0;
+let noise = null, ns = 0, swirl = 0, speed = 0, fadeRate = 0, timeScale = 0, zTime = 0;
+let noise2 = null, ns2 = 0, transT = 1, transDur = 1;   // 旧流场交叉淡化状态
+let seed = 0, seedHex = '';
+let rnd = Math.random;
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+function newSeed(){
+  // 无缝重生成：旧噪声场保留 1.2s 做交叉淡化，不清屏、不重置粒子、无同步预热，
+  // 旧轨迹自然消隐的同时新场平滑接管 → 点击零卡顿、画面无跳变
+  if(noise){
+    noise2 = noise; ns2 = ns;
+    transT = 0; transDur = 1.2;
+  }
+  seed = (Math.random() * 4294967296) >>> 0;
+  seedHex = seed.toString(16).toUpperCase().padStart(8, '0');
+  const R = mulberry32(seed);
+  rnd = R;
+  noise = makePerlin((R() * 4294967296) >>> 0);
+  ns = 1 / (340 + R() * 420);              // 噪声空间频率 → 流场涡团尺寸
+  swirl = TAU * (1.05 + R() * 1.35);       // 噪声值 → 流向角的放大倍数
+  speed = 90 + R() * 80;                   // 基础流速 px/s
+  fadeRate = -Math.log(1 - (0.022 + R() * 0.02)) * 60;   // 每秒轨迹衰减率（帧率无关）→ 拖尾长度
+  timeScale = (0.045 + R() * 0.075) * (reduced ? 0.35 : 1);
+  seedEl.textContent = '#' + seedHex;
+  document.title = 'Sunset Flow Field · #' + seedHex;
+}
+
+function respawn(i){
+  px[i] = rnd() * W; py[i] = rnd() * H;
+  ox[i] = px[i]; oy[i] = py[i];
+  life[i] = 2 + rnd() * 5;
+  // 颜色由所在区域的低频噪声决定（形成大尺度色彩区域），再混入随机变化
+  const c = (noise(px[i] * 0.0016 + 7.31, py[i] * 0.0016 + 3.17, zTime * 0.5) + 1) * 0.5;
+  const m = Math.max(0, Math.min(1, c * 0.62 + (rnd() + rnd()) * 0.19));
+  col[i] = Math.min(B - 1, (m * B) | 0);
+}
+function respawnAll(){ if(noise) for(let i = 0; i < N; i++) respawn(i); }
+
+/* ---------- 画布尺寸 & 静态特效层（暖光 + 暗角 + 颗粒） ---------- */
+function drawFX(){
+  fctx.clearRect(0, 0, W, H);
+  let g = fctx.createRadialGradient(W * 0.5, H * 0.44, 0, W * 0.5, H * 0.44, Math.max(W, H) * 0.72);
+  g.addColorStop(0, 'rgba(255,122,72,0.10)');
+  g.addColorStop(0.45, 'rgba(232,80,158,0.045)');
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  fctx.fillStyle = g; fctx.fillRect(0, 0, W, H);
+
+  g = fctx.createRadialGradient(W * 0.5, H * 0.5, Math.min(W, H) * 0.38, W * 0.5, H * 0.5, Math.hypot(W, H) * 0.6);
+  g.addColorStop(0, 'rgba(6,3,12,0)');
+  g.addColorStop(0.75, 'rgba(6,3,12,0.26)');
+  g.addColorStop(1, 'rgba(4,2,10,0.66)');
+  fctx.fillStyle = g; fctx.fillRect(0, 0, W, H);
+
+  const grain = Math.min(4200, Math.round(W * H / 450));
+  for(let i = 0; i < grain; i++){
+    fctx.fillStyle = Math.random() < 0.5 ? 'rgba(255,255,255,0.028)' : 'rgba(0,0,0,0.05)';
+    fctx.fillRect(Math.random() * W, Math.random() * H, 1, 1);
+  }
+}
+
+function resize(){
+  dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth; H = window.innerHeight;
+  art.width = Math.round(W * dpr); art.height = Math.round(H * dpr);
+  fx.width = art.width; fx.height = art.height;
+  actx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  actx.lineCap = 'round';
+  N = Math.max(5000, Math.min(9000, Math.round(W * H / 260)));
+  countEl.textContent = N.toLocaleString('en-US');
+  drawFX();
+  actx.clearRect(0, 0, W, H);
+  respawnAll();
+}
+
+/* ---------- 每帧：衰减旧轨迹 → 按颜色分桶 → 推进粒子并批量描边 ---------- */
+function stepAndDraw(dt){
+  // 新旧流场交叉淡化进度（smoothstep）：u=1 表示完全使用新场
+  let u = 1;
+  if(noise2 !== null){
+    transT += dt;
+    const r = transT / transDur;
+    if(r >= 1){ noise2 = null; }
+    else u = r * r * (3 - 2 * r);
+  }
+  // 衰减与叠加透明度均按 dt 换算：任意刷新率下拖尾长度与线条亮度保持一致
+  actx.globalCompositeOperation = 'destination-out';
+  actx.globalAlpha = 1 - Math.exp(-fadeRate * dt);
+  actx.fillStyle = '#000';
+  actx.fillRect(0, 0, W, H);
+
+  counts.fill(0);
+  for(let i = 0; i < N; i++) counts[col[i]]++;
+  starts[0] = 0;
+  for(let b = 0; b < B; b++){ starts[b + 1] = starts[b] + counts[b]; cursor[b] = starts[b]; }
+  for(let i = 0; i < N; i++) order[cursor[col[i]]++] = i;
+
+  actx.globalCompositeOperation = 'lighter';
+  actx.globalAlpha = Math.min(0.85, 0.30 * dt * 60);
+  actx.lineWidth = 1.1;
+  for(let b = 0; b < B; b++){
+    actx.strokeStyle = bucketStyle[b];
+    actx.beginPath();
+    for(let k = starts[b]; k < starts[b + 1]; k++){
+      const i = order[k];
+      let n;
+      if(u === 1){
+        n = noise(px[i] * ns, py[i] * ns, zTime);
+      }else{
+        n = noise2(px[i] * ns2, py[i] * ns2, zTime) * (1 - u)
+          + noise(px[i] * ns, py[i] * ns, zTime) * u;
+      }
+      const ti = (n * swirl * TRIG_SCALE) & TRIG_MASK;
+      const sp = speed * (0.7 + 0.6 * (n < 0 ? -n : n));
+      const nx = px[i] + COS_T[ti] * sp * dt;
+      const ny = py[i] + SIN_T[ti] * sp * dt;
+      ox[i] = px[i]; oy[i] = py[i];
+      px[i] = nx; py[i] = ny;
+      life[i] -= dt;
+      if(life[i] <= 0 || nx < -24 || nx > W + 24 || ny < -24 || ny > H + 24){ respawn(i); continue; }
+      actx.moveTo(ox[i], oy[i]);
+      actx.lineTo(nx, ny);
+    }
+    actx.stroke();
+  }
+}
+
+function prewarm(){
+  for(let k = 0; k < 80; k++){
+    zTime += timeScale / 60;
+    stepAndDraw(1 / 60);
+  }
+}
+
+/* ---------- 主循环：帧率不设上限；粒子密度以实测 FPS 匹配，优先保 60FPS ---------- */
+let lastT = performance.now(), panelT = 0;
+let wStart = performance.now(), wFrames = 0, fpsWin = 0, fpsOkPrev = false;
+const N_MIN = 2000, N_MAX = 11000;
+function adapt(){
+  if(fpsWin <= 0 || noise2 !== null) return;   // 无帧数据 / 场交叉淡化期间不调整
+  const f = fpsWin;
+  let delta = 0;
+  if(f < 55 && N > N_MIN){
+    // FPS 低于 60 → 减粒子优先保流畅；跌幅越大减得越快
+    delta = -Math.max(300, (N * (f < 40 ? 0.2 : 0.12)) | 0);
+    fpsOkPrev = false;
+  }else if(f >= 58 && fpsOkPrev && N < N_MAX){
+    // 连续整秒都达到 60FPS 档位 → 逐步加密
+    delta = Math.max(150, (N * 0.04) | 0);
+  }
+  fpsOkPrev = f >= 58;
+  if(delta){
+    const oldN = N;
+    N = Math.max(N_MIN, Math.min(N_MAX, N + delta));
+    for(let i = oldN; i < N; i++) respawn(i);
+    countEl.textContent = N.toLocaleString('en-US');
+  }
+}
+function frame(now){
+  requestAnimationFrame(frame);
+  let dtRaw = (now - lastT) / 1000;
+  lastT = now;
+  if(!(dtRaw > 0) || dtRaw > 1) dtRaw = 0.016;   // 标签页切回时的保护
+  const dt = Math.min(dtRaw, 0.033);
+  wFrames++;
+  if(now - wStart >= 1000){                      // 每秒统计一次真实帧率（比瞬时值更稳）
+    fpsWin = wFrames * 1000 / (now - wStart);
+    wFrames = 0; wStart = now;
+    adapt();
+  }
+  zTime += dt * timeScale;
+  stepAndDraw(dt);
+  if(now - panelT > 400){
+    panelT = now;
+    fpsEl.textContent = fpsWin > 0 ? String(Math.round(fpsWin)) : '—';
+  }
+}
+
+/* ---------- 保存 PNG（背景 + 轨迹层 + 暗角层合成导出） ---------- */
+function savePNG(){
+  const out = document.createElement('canvas');
+  out.width = art.width; out.height = art.height;
+  const c = out.getContext('2d');
+  c.fillStyle = BG;
+  c.fillRect(0, 0, out.width, out.height);
+  c.drawImage(art, 0, 0);
+  c.drawImage(fx, 0, 0);
+  out.toBlob(function(blob){
+    const a = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    a.href = url;
+    a.download = 'flow-field-' + seedHex + '.png';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 3000);
+  }, 'image/png');
+}
+
+function regen(){
+  newSeed();   // 无需清屏与同步预热：旧轨迹自然消隐，新场交叉接管 → 零卡顿
+}
+
+document.getElementById('btnRegen').addEventListener('click', regen);
+document.getElementById('btnSave').addEventListener('click', savePNG);
+addEventListener('keydown', function(e){
+  if(e.metaKey || e.ctrlKey || e.altKey) return;
+  const k = e.key.toLowerCase();
+  if(k === 'r') regen();
+  else if(k === 's'){ e.preventDefault(); savePNG(); }
+});
+
+let rzT;
+addEventListener('resize', function(){ clearTimeout(rzT); rzT = setTimeout(resize, 150); });
+document.addEventListener('visibilitychange', function(){
+  if(!document.hidden) lastT = performance.now();
+});
+
+resize();
+newSeed();
+respawnAll();
+prewarm();
+requestAnimationFrame(function(t){ lastT = t; requestAnimationFrame(frame); });
+</script>
+</body>
+</html>
